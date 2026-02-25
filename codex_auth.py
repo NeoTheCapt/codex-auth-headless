@@ -3,7 +3,7 @@
 import base64
 import hashlib
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, parse_qs
 
 CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
 AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
@@ -48,3 +48,37 @@ def build_auth_url(code_challenge):
     }
     url = f'{AUTH_ENDPOINT}?{urlencode(params)}'
     return url, state
+
+
+def parse_callback_url(url):
+    """Extract the authorization code and state from an OAuth callback URL.
+
+    Args:
+        url: The full callback URL from the browser address bar.
+
+    Returns:
+        tuple: (code, state) extracted from URL query parameters.
+
+    Raises:
+        ValueError: If the URL contains an error or is missing the code parameter.
+    """
+    # Handle URLs that may not have a scheme
+    if not url.startswith('http'):
+        url = 'http://' + url
+
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+
+    # Check for OAuth error response
+    if 'error' in params:
+        error = params['error'][0]
+        desc = params.get('error_description', [''])[0]
+        raise ValueError(f'OAuth error: {error} - {desc}')
+
+    if 'code' not in params:
+        raise ValueError('Missing "code" parameter in callback URL. '
+                         'Make sure you copied the full URL from the browser address bar.')
+
+    code = params['code'][0]
+    state = params.get('state', [None])[0]
+    return code, state

@@ -72,5 +72,44 @@ class TestAuthURL(unittest.TestCase):
         self.assertNotEqual(s1, s2)
 
 
+class TestCallbackParser(unittest.TestCase):
+    def test_extracts_code_and_state(self):
+        from codex_auth import parse_callback_url
+        url = 'http://localhost:1455/auth/callback?code=abc123&state=xyz789'
+        code, state = parse_callback_url(url)
+        self.assertEqual(code, 'abc123')
+        self.assertEqual(state, 'xyz789')
+
+    def test_extracts_code_with_scope(self):
+        """Real callback URLs may include scope parameter."""
+        from codex_auth import parse_callback_url
+        url = 'http://localhost:1455/auth/callback?code=abc&scope=openid+profile&state=xyz'
+        code, state = parse_callback_url(url)
+        self.assertEqual(code, 'abc')
+        self.assertEqual(state, 'xyz')
+
+    def test_raises_on_missing_code(self):
+        from codex_auth import parse_callback_url
+        url = 'http://localhost:1455/auth/callback?state=xyz'
+        with self.assertRaises(ValueError) as ctx:
+            parse_callback_url(url)
+        self.assertIn('code', str(ctx.exception).lower())
+
+    def test_raises_on_error_response(self):
+        """OAuth errors come as error= in the callback URL."""
+        from codex_auth import parse_callback_url
+        url = 'http://localhost:1455/auth/callback?error=access_denied&error_description=User+denied'
+        with self.assertRaises(ValueError) as ctx:
+            parse_callback_url(url)
+        self.assertIn('access_denied', str(ctx.exception))
+
+    def test_handles_url_without_scheme(self):
+        """User might paste just the path+query."""
+        from codex_auth import parse_callback_url
+        url = 'localhost:1455/auth/callback?code=abc123&state=xyz789'
+        code, state = parse_callback_url(url)
+        self.assertEqual(code, 'abc123')
+
+
 if __name__ == '__main__':
     unittest.main()
