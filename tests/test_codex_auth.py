@@ -260,5 +260,46 @@ class TestCredentialWriter(unittest.TestCase):
             self.assertEqual(mode, 0o600)
 
 
+class TestMainFlow(unittest.TestCase):
+    @patch('codex_auth.exchange_code_for_tokens')
+    @patch('codex_auth.save_credentials')
+    @patch('builtins.input')
+    def test_main_flow_happy_path(self, mock_input, mock_save, mock_exchange):
+        """main() should orchestrate: PKCE -> URL -> paste -> exchange -> save."""
+        from codex_auth import main
+
+        mock_input.return_value = 'http://localhost:1455/auth/callback?code=test_code&state={state}'
+        mock_exchange.return_value = {
+            'access_token': 'at', 'refresh_token': 'rt',
+            'id_token': 'id', 'expires_in': 3600,
+        }
+
+        # We need to capture the state to inject it into the mock input
+        # This test verifies the flow calls the right functions in order
+        with patch('codex_auth.generate_pkce_pair', return_value=('verifier', 'challenge')):
+            with patch('codex_auth.build_auth_url', return_value=('https://auth.example.com', 'test_state')):
+                mock_input.return_value = 'http://localhost:1455/auth/callback?code=test_code&state=test_state'
+                main()
+
+        mock_exchange.assert_called_once_with('test_code', 'verifier')
+        mock_save.assert_called_once()
+
+    @patch('codex_auth.exchange_code_for_tokens')
+    @patch('codex_auth.save_credentials')
+    @patch('builtins.input')
+    def test_main_flow_state_mismatch_aborts(self, mock_input, mock_save, mock_exchange):
+        """main() should abort if state doesn't match (CSRF protection)."""
+        from codex_auth import main
+
+        with patch('codex_auth.generate_pkce_pair', return_value=('verifier', 'challenge')):
+            with patch('codex_auth.build_auth_url', return_value=('https://auth.example.com', 'expected_state')):
+                mock_input.return_value = 'http://localhost:1455/auth/callback?code=c&state=wrong_state'
+                with self.assertRaises(SystemExit):
+                    main()
+
+        mock_exchange.assert_not_called()
+        mock_save.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -8,6 +8,7 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 import json
 import os
+import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -171,3 +172,59 @@ def save_credentials(token_response, codex_home=None):
     except Exception:
         os.close(fd)
         raise
+
+
+def main():
+    """Run the CodexAuthProxy OAuth flow."""
+    print('\n=== CodexAuthProxy ===')
+    print('Headless OAuth authentication for OpenAI Codex CLI\n')
+
+    # Step 1: Generate PKCE pair
+    print('Generating PKCE challenge...')
+    code_verifier, code_challenge = generate_pkce_pair()
+
+    # Step 2: Build and display auth URL
+    auth_url, expected_state = build_auth_url(code_challenge)
+    print('\nStep 1: Open this URL in any browser and sign in with ChatGPT:')
+    print(f'\n  {auth_url}\n')
+    print('Step 2: After signing in, the browser will try to redirect to')
+    print('        localhost:1455 and FAIL. That\'s expected!')
+    print('\nStep 3: Copy the FULL URL from the browser\'s address bar')
+    print('        (it starts with http://localhost:1455/auth/callback?...)')
+
+    # Step 3: Get callback URL from user
+    callback_url = input('\nPaste the callback URL here: ').strip()
+
+    if not callback_url:
+        print('Error: No URL provided.')
+        sys.exit(1)
+
+    # Step 4: Parse callback URL
+    try:
+        code, state = parse_callback_url(callback_url)
+    except ValueError as e:
+        print(f'\nError: {e}')
+        sys.exit(1)
+
+    # Step 5: Validate state (CSRF protection)
+    if state != expected_state:
+        print('\nError: State mismatch - possible CSRF attack or stale URL.')
+        print('Please start over and use a fresh authorization URL.')
+        sys.exit(1)
+
+    # Step 6: Exchange code for tokens
+    print('\nExchanging authorization code for tokens...')
+    try:
+        tokens = exchange_code_for_tokens(code, code_verifier)
+    except ValueError as e:
+        print(f'\nError: {e}')
+        sys.exit(1)
+
+    # Step 7: Save credentials
+    save_credentials(tokens)
+    print('\nSuccess! Credentials saved to ~/.codex/auth.json')
+    print('You can now use `codex` normally.')
+
+
+if __name__ == '__main__':
+    main()
