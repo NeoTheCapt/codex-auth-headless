@@ -193,5 +193,72 @@ class TestTokenExchange(unittest.TestCase):
         self.assertIn('invalid_grant', str(ctx.exception))
 
 
+import tempfile
+import os
+
+
+class TestCredentialWriter(unittest.TestCase):
+    def test_creates_auth_json(self):
+        from codex_auth import save_credentials
+        with tempfile.TemporaryDirectory() as tmpdir:
+            token_response = {
+                'access_token': 'at_test',
+                'refresh_token': 'rt_test',
+                'id_token': 'id_test',
+                'expires_in': 3600,
+                'token_type': 'Bearer',
+            }
+            save_credentials(token_response, codex_home=tmpdir)
+
+            auth_path = os.path.join(tmpdir, 'auth.json')
+            self.assertTrue(os.path.exists(auth_path))
+
+            with open(auth_path) as f:
+                saved = json.load(f)
+
+            self.assertEqual(saved['auth_mode'], 'chatgpt')
+            self.assertEqual(saved['tokens']['access_token'], 'at_test')
+            self.assertEqual(saved['tokens']['refresh_token'], 'rt_test')
+            self.assertEqual(saved['tokens']['id_token'], 'id_test')
+            self.assertIn('expires_at', saved['tokens'])
+            self.assertIn('last_refresh', saved)
+
+    def test_creates_codex_dir_if_missing(self):
+        from codex_auth import save_credentials
+        with tempfile.TemporaryDirectory() as tmpdir:
+            codex_dir = os.path.join(tmpdir, 'nonexistent', '.codex')
+            save_credentials({'access_token': 'a', 'refresh_token': 'r',
+                              'id_token': 'i', 'expires_in': 3600},
+                             codex_home=codex_dir)
+            self.assertTrue(os.path.exists(os.path.join(codex_dir, 'auth.json')))
+
+    def test_backs_up_existing_auth_json(self):
+        from codex_auth import save_credentials
+        with tempfile.TemporaryDirectory() as tmpdir:
+            auth_path = os.path.join(tmpdir, 'auth.json')
+            with open(auth_path, 'w') as f:
+                f.write('{"old": "data"}')
+
+            save_credentials({'access_token': 'new', 'refresh_token': 'r',
+                              'id_token': 'i', 'expires_in': 3600},
+                             codex_home=tmpdir)
+
+            bak_path = os.path.join(tmpdir, 'auth.json.bak')
+            self.assertTrue(os.path.exists(bak_path))
+            with open(bak_path) as f:
+                self.assertIn('old', f.read())
+
+    def test_file_permissions(self):
+        """auth.json should be readable/writable only by owner (0o600)."""
+        from codex_auth import save_credentials
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_credentials({'access_token': 'a', 'refresh_token': 'r',
+                              'id_token': 'i', 'expires_in': 3600},
+                             codex_home=tmpdir)
+            auth_path = os.path.join(tmpdir, 'auth.json')
+            mode = os.stat(auth_path).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+
+
 if __name__ == '__main__':
     unittest.main()

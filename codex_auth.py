@@ -7,6 +7,9 @@ from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 import json
+import os
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
 AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
@@ -124,3 +127,47 @@ def exchange_code_for_tokens(code, code_verifier):
             ) from e
         except json.JSONDecodeError:
             raise ValueError(f"Token exchange failed (HTTP {e.code}): {body}") from e
+
+
+def save_credentials(token_response, codex_home=None):
+    """Save OAuth tokens to ~/.codex/auth.json in the format Codex CLI expects.
+
+    Args:
+        token_response: Dict from the token endpoint (access_token, refresh_token, etc.)
+        codex_home: Override for ~/.codex directory (used in tests).
+    """
+    if codex_home is None:
+        codex_home = os.path.join(Path.home(), '.codex')
+
+    os.makedirs(codex_home, exist_ok=True)
+    auth_path = os.path.join(codex_home, 'auth.json')
+
+    # Back up existing auth.json
+    if os.path.exists(auth_path):
+        bak_path = auth_path + '.bak'
+        os.replace(auth_path, bak_path)
+
+    now = datetime.now(timezone.utc)
+    expires_in = token_response.get('expires_in', 3600)
+    expires_at = now + timedelta(seconds=expires_in)
+
+    credentials = {
+        'auth_mode': 'chatgpt',
+        'tokens': {
+            'access_token': token_response['access_token'],
+            'refresh_token': token_response['refresh_token'],
+            'id_token': token_response.get('id_token', ''),
+            'expires_at': expires_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        },
+        'last_refresh': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+    }
+
+    # Write with restricted permissions
+    fd = os.open(auth_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(credentials, f, indent=2)
+            f.write('\n')
+    except Exception:
+        os.close(fd)
+        raise
