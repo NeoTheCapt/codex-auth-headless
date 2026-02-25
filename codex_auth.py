@@ -4,6 +4,9 @@ import base64
 import hashlib
 import secrets
 from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
+import json
 
 CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
 AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
@@ -82,3 +85,42 @@ def parse_callback_url(url):
     code = params['code'][0]
     state = params.get('state', [None])[0]
     return code, state
+
+
+def exchange_code_for_tokens(code, code_verifier):
+    """Exchange an authorization code for access/refresh tokens.
+
+    Args:
+        code: The authorization code from the OAuth callback.
+        code_verifier: The original PKCE code_verifier.
+
+    Returns:
+        dict: Token response containing access_token, refresh_token, id_token, etc.
+
+    Raises:
+        ValueError: If the token exchange fails.
+    """
+    data = urlencode({
+        'grant_type': 'authorization_code',
+        'code': code,
+        'client_id': CLIENT_ID,
+        'redirect_uri': REDIRECT_URI,
+        'code_verifier': code_verifier,
+    }).encode('ascii')
+
+    request = Request(TOKEN_ENDPOINT, data=data, method='POST')
+    request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+
+    try:
+        with urlopen(request) as response:
+            return json.loads(response.read())
+    except HTTPError as e:
+        body = e.read().decode()
+        try:
+            err = json.loads(body)
+            raise ValueError(
+                f"Token exchange failed: {err.get('error', 'unknown')} - "
+                f"{err.get('error_description', body)}"
+            ) from e
+        except json.JSONDecodeError:
+            raise ValueError(f"Token exchange failed (HTTP {e.code}): {body}") from e

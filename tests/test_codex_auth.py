@@ -72,6 +72,10 @@ class TestAuthURL(unittest.TestCase):
         self.assertNotEqual(s1, s2)
 
 
+from unittest.mock import patch, MagicMock
+import json
+
+
 class TestCallbackParser(unittest.TestCase):
     def test_extracts_code_and_state(self):
         from codex_auth import parse_callback_url
@@ -109,6 +113,84 @@ class TestCallbackParser(unittest.TestCase):
         url = 'localhost:1455/auth/callback?code=abc123&state=xyz789'
         code, state = parse_callback_url(url)
         self.assertEqual(code, 'abc123')
+
+
+class TestTokenExchange(unittest.TestCase):
+    @patch('codex_auth.urlopen')
+    def test_sends_correct_post_body(self, mock_urlopen):
+        """Token exchange should POST correct params to token endpoint."""
+        from codex_auth import exchange_code_for_tokens, TOKEN_ENDPOINT
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            'access_token': 'at_123',
+            'refresh_token': 'rt_456',
+            'id_token': 'id_789',
+            'expires_in': 3600,
+            'token_type': 'Bearer',
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        result = exchange_code_for_tokens('auth_code_abc', 'my_verifier')
+
+        # Verify the request
+        call_args = mock_urlopen.call_args
+        request = call_args[0][0]
+        self.assertEqual(request.full_url, TOKEN_ENDPOINT)
+        self.assertEqual(request.get_method(), 'POST')
+
+        body = parse_qs(request.data.decode())
+        self.assertEqual(body['grant_type'], ['authorization_code'])
+        self.assertEqual(body['code'], ['auth_code_abc'])
+        self.assertEqual(body['code_verifier'], ['my_verifier'])
+        self.assertEqual(body['client_id'], ['REDACTED_CODEX_CLIENT_ID'])
+        self.assertEqual(body['redirect_uri'], ['http://localhost:1455/auth/callback'])
+
+    @patch('codex_auth.urlopen')
+    def test_returns_parsed_tokens(self, mock_urlopen):
+        """Should return the parsed JSON token response."""
+        from codex_auth import exchange_code_for_tokens
+
+        token_data = {
+            'access_token': 'at_123',
+            'refresh_token': 'rt_456',
+            'id_token': 'id_789',
+            'expires_in': 3600,
+            'token_type': 'Bearer',
+        }
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(token_data).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        result = exchange_code_for_tokens('code', 'verifier')
+        self.assertEqual(result['access_token'], 'at_123')
+        self.assertEqual(result['refresh_token'], 'rt_456')
+        self.assertEqual(result['id_token'], 'id_789')
+        self.assertEqual(result['expires_in'], 3600)
+
+    @patch('codex_auth.urlopen')
+    def test_raises_on_http_error(self, mock_urlopen):
+        """Should raise ValueError with error details on HTTP failure."""
+        from codex_auth import exchange_code_for_tokens
+        from urllib.error import HTTPError
+        import io
+
+        error_body = json.dumps({'error': 'invalid_grant', 'error_description': 'Code expired'})
+        mock_urlopen.side_effect = HTTPError(
+            url='https://auth.openai.com/oauth/token',
+            code=400,
+            msg='Bad Request',
+            hdrs={},
+            fp=io.BytesIO(error_body.encode())
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            exchange_code_for_tokens('bad_code', 'verifier')
+        self.assertIn('invalid_grant', str(ctx.exception))
 
 
 if __name__ == '__main__':
