@@ -2,6 +2,7 @@
 import hashlib
 import base64
 import unittest
+from urllib.parse import urlparse, parse_qs
 
 
 class TestPKCE(unittest.TestCase):
@@ -34,6 +35,41 @@ class TestPKCE(unittest.TestCase):
         v1, _ = generate_pkce_pair()
         v2, _ = generate_pkce_pair()
         self.assertNotEqual(v1, v2)
+
+
+class TestAuthURL(unittest.TestCase):
+    def test_auth_url_has_correct_base(self):
+        from codex_auth import build_auth_url
+        url, state = build_auth_url('test_challenge')
+        parsed = urlparse(url)
+        self.assertEqual(parsed.scheme, 'https')
+        self.assertEqual(parsed.netloc, 'auth.openai.com')
+        self.assertEqual(parsed.path, '/oauth/authorize')
+
+    def test_auth_url_has_required_params(self):
+        from codex_auth import build_auth_url
+        url, state = build_auth_url('test_challenge')
+        params = parse_qs(urlparse(url).query)
+        self.assertEqual(params['client_id'], ['REDACTED_CODEX_CLIENT_ID'])
+        self.assertEqual(params['redirect_uri'], ['http://localhost:1455/auth/callback'])
+        self.assertEqual(params['response_type'], ['code'])
+        self.assertEqual(params['code_challenge_method'], ['S256'])
+        self.assertEqual(params['code_challenge'], ['test_challenge'])
+        self.assertIn('openid', params['scope'][0])
+        self.assertIn('offline_access', params['scope'][0])
+
+    def test_auth_url_state_is_returned(self):
+        from codex_auth import build_auth_url
+        url, state = build_auth_url('test_challenge')
+        params = parse_qs(urlparse(url).query)
+        self.assertEqual(params['state'], [state])
+        self.assertGreater(len(state), 16)
+
+    def test_auth_url_state_is_unique(self):
+        from codex_auth import build_auth_url
+        _, s1 = build_auth_url('c1')
+        _, s2 = build_auth_url('c2')
+        self.assertNotEqual(s1, s2)
 
 
 if __name__ == '__main__':

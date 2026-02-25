@@ -3,6 +3,13 @@
 import base64
 import hashlib
 import secrets
+from urllib.parse import urlencode
+
+CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
+AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
+TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token'
+REDIRECT_URI = 'http://localhost:1455/auth/callback'
+SCOPES = 'openid profile email offline_access'
 
 
 def generate_pkce_pair():
@@ -18,3 +25,26 @@ def generate_pkce_pair():
     digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
     return code_verifier, code_challenge
+
+
+def build_auth_url(code_challenge):
+    """Build the OpenAI OAuth authorization URL.
+
+    Args:
+        code_challenge: The PKCE code challenge string.
+
+    Returns:
+        tuple: (authorization_url, state) where state is used for CSRF validation.
+    """
+    state = secrets.token_urlsafe(32)
+    params = {
+        'response_type': 'code',
+        'client_id': CLIENT_ID,
+        'redirect_uri': REDIRECT_URI,
+        'scope': SCOPES,
+        'code_challenge_method': 'S256',
+        'code_challenge': code_challenge,
+        'state': state,
+    }
+    url = f'{AUTH_ENDPOINT}?{urlencode(params)}'
+    return url, state
