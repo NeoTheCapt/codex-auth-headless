@@ -12,11 +12,40 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
 AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
 TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token'
 REDIRECT_URI = 'http://localhost:1455/auth/callback'
 SCOPES = 'openid profile email offline_access'
+
+
+def _load_env_file():
+    """Load variables from .env file if it exists."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if not os.path.exists(env_path):
+        return
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, _, value = line.partition('=')
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key not in os.environ:
+                os.environ[key] = value
+
+
+_load_env_file()
+
+
+def get_client_id():
+    """Get the Codex OAuth client ID from environment."""
+    client_id = os.environ.get('CODEX_CLIENT_ID')
+    if not client_id:
+        print('Error: CODEX_CLIENT_ID not set.')
+        print('Set it via environment variable or .env file.')
+        sys.exit(1)
+    return client_id
 
 
 def generate_pkce_pair():
@@ -46,7 +75,7 @@ def build_auth_url(code_challenge):
     state = secrets.token_urlsafe(32)
     params = {
         'response_type': 'code',
-        'client_id': CLIENT_ID,
+        'client_id': get_client_id(),
         'redirect_uri': REDIRECT_URI,
         'scope': SCOPES,
         'code_challenge_method': 'S256',
@@ -107,7 +136,7 @@ def exchange_code_for_tokens(code, code_verifier):
     data = urlencode({
         'grant_type': 'authorization_code',
         'code': code,
-        'client_id': CLIENT_ID,
+        'client_id': get_client_id(),
         'redirect_uri': REDIRECT_URI,
         'code_verifier': code_verifier,
     }).encode('ascii')

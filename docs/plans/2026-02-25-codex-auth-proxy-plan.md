@@ -113,7 +113,7 @@ git commit -m "feat: add PKCE code_verifier/code_challenge generator"
 - Modify: `tests/test_codex_auth.py`
 
 **Context:** OAuth parameters discovered from Codex CLI source:
-- Client ID: `REDACTED_CODEX_CLIENT_ID`
+- Client ID: `<CODEX_CLIENT_ID>`
 - Auth endpoint: `https://auth.openai.com/oauth/authorize`
 - Token endpoint: `https://auth.openai.com/oauth/token`
 - Redirect URI: `http://localhost:1455/auth/callback`
@@ -140,7 +140,7 @@ class TestAuthURL(unittest.TestCase):
         from codex_auth import build_auth_url
         url, state = build_auth_url('test_challenge')
         params = parse_qs(urlparse(url).query)
-        self.assertEqual(params['client_id'], ['REDACTED_CODEX_CLIENT_ID'])
+        self.assertEqual(params['client_id'], ['<CODEX_CLIENT_ID>'])
         self.assertEqual(params['redirect_uri'], ['http://localhost:1455/auth/callback'])
         self.assertEqual(params['response_type'], ['code'])
         self.assertEqual(params['code_challenge_method'], ['S256'])
@@ -174,7 +174,7 @@ Add to `codex_auth.py`:
 ```python
 from urllib.parse import urlencode
 
-CLIENT_ID = 'REDACTED_CODEX_CLIENT_ID'
+CLIENT_ID = '<CODEX_CLIENT_ID>'
 AUTH_ENDPOINT = 'https://auth.openai.com/oauth/authorize'
 TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token'
 REDIRECT_URI = 'http://localhost:1455/auth/callback'
@@ -376,7 +376,7 @@ class TestTokenExchange(unittest.TestCase):
         self.assertEqual(body['grant_type'], ['authorization_code'])
         self.assertEqual(body['code'], ['auth_code_abc'])
         self.assertEqual(body['code_verifier'], ['my_verifier'])
-        self.assertEqual(body['client_id'], ['REDACTED_CODEX_CLIENT_ID'])
+        self.assertEqual(body['client_id'], ['<CODEX_CLIENT_ID>'])
         self.assertEqual(body['redirect_uri'], ['http://localhost:1455/auth/callback'])
 
     @patch('codex_auth.urlopen')

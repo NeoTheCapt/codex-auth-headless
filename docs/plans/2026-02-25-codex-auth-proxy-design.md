@@ -27,7 +27,7 @@ Five components in one file (`codex_auth.py`):
 
 ### 2. Auth URL Builder
 Constructs the OpenAI authorization URL with:
-- `client_id`: `REDACTED_CODEX_CLIENT_ID` (Codex CLI's registered OAuth client)
+- `client_id`: `<CODEX_CLIENT_ID>` (Codex CLI's registered OAuth client)
 - `redirect_uri`: `http://localhost:1455/auth/callback`
 - `response_type`: `code`
 - `code_challenge_method`: `S256`
@@ -115,7 +115,7 @@ CodexAuthProxy/
 ## Key Technical Details
 
 - OAuth endpoints: `https://auth.openai.com/oauth/authorize` and `https://auth.openai.com/oauth/token`
-- Client ID: `REDACTED_CODEX_CLIENT_ID`
+- Client ID: `<CODEX_CLIENT_ID>`
 - Callback port: 1455 (hardcoded in OpenAI's OAuth app registration)
 - PKCE method: S256
 - Python 3.6+ compatible (uses only stdlib: `secrets`, `hashlib`, `base64`, `urllib`, `json`, `os`, `pathlib`)

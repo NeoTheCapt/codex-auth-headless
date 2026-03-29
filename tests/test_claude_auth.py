@@ -1,8 +1,12 @@
 # tests/test_claude_auth.py
 import hashlib
 import base64
+import os
 import unittest
 from urllib.parse import urlparse, parse_qs
+
+# Set test client ID before importing claude_auth
+os.environ.setdefault('CLAUDE_CLIENT_ID', 'test_claude_client_id')
 
 
 class TestPKCE(unittest.TestCase):
@@ -51,7 +55,7 @@ class TestAuthURL(unittest.TestCase):
         url, state = build_auth_url('test_challenge')
         params = parse_qs(urlparse(url).query)
         self.assertEqual(params['code'], ['true'])
-        self.assertEqual(params['client_id'], ['REDACTED_CLAUDE_CLIENT_ID'])
+        self.assertEqual(params['client_id'], ['test_claude_client_id'])
         self.assertEqual(params['redirect_uri'], ['https://platform.claude.com/oauth/code/callback'])
         self.assertEqual(params['response_type'], ['code'])
         self.assertEqual(params['code_challenge_method'], ['S256'])
@@ -159,7 +163,7 @@ class TestTokenExchange(unittest.TestCase):
         self.assertEqual(body['grant_type'], 'authorization_code')
         self.assertEqual(body['code'], 'auth_code_abc')
         self.assertEqual(body['code_verifier'], 'my_verifier')
-        self.assertEqual(body['client_id'], 'REDACTED_CLAUDE_CLIENT_ID')
+        self.assertEqual(body['client_id'], 'test_claude_client_id')
         self.assertEqual(body['redirect_uri'], 'https://platform.claude.com/oauth/code/callback')
 
     @patch('claude_auth.urlopen')

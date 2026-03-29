@@ -47,9 +47,9 @@ htmlcov/
 .tox/
 
 # Secrets (if accidentally created)
-*.env
-.env.*
+.env
 *.secret
 *.key
 *.pem
 auth.json
+.credentials.json

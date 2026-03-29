@@ -18,9 +18,27 @@ git clone https://github.com/YOUR_USERNAME/codex-auth-headless.git
 cd codex-auth-headless
 
 # No dependencies needed - uses Python standard library only
+
+# Set up your Client IDs
+cp .env.example .env
+# Edit .env and fill in your Client IDs
 ```
 
 **Requirements:** Python 3.7+
+
+## Configuration
+
+Client IDs are loaded from environment variables or a `.env` file:
+
+```bash
+# Option 1: .env file (recommended)
+cp .env.example .env
+# Edit .env with your Client IDs
+
+# Option 2: Environment variables
+export CODEX_CLIENT_ID=your_codex_client_id
+export CLAUDE_CLIENT_ID=your_claude_client_id
+```
 
 ## Usage: Codex CLI
 
