@@ -93,7 +93,10 @@ def parse_callback_input(user_input):
 
         return params['code'][0]
 
-    # Treat as bare authorization code
+    # The callback page may show code#state — strip the state part
+    if '#' in user_input:
+        user_input = user_input.split('#')[0]
+
     return user_input
 
 
@@ -120,6 +123,7 @@ def exchange_code_for_tokens(code, code_verifier):
 
     request = Request(TOKEN_ENDPOINT, data=data, method='POST')
     request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    request.add_header('User-Agent', 'claude-code/1.0')
 
     try:
         with urlopen(request) as response:

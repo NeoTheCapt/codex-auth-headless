@@ -105,6 +105,12 @@ class TestCallbackInputParser(unittest.TestCase):
         code = parse_callback_input('  some_code_value  ')
         self.assertEqual(code, 'some_code_value')
 
+    def test_accepts_code_hash_state_format(self):
+        """Callback page shows code#state — should extract just the code."""
+        from claude_auth import parse_callback_input
+        code = parse_callback_input('vk7O3LkcJ0mWzYEEv1eYw4MV6wXiuqfG#P4rKfWs8HKimEaclOgJd6ytBBD6nw')
+        self.assertEqual(code, 'vk7O3LkcJ0mWzYEEv1eYw4MV6wXiuqfG')
+
     def test_raises_on_empty_input(self):
         from claude_auth import parse_callback_input
         with self.assertRaises(ValueError) as ctx:
