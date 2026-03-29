@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 
 CLIENT_ID = 'REDACTED_CLAUDE_CLIENT_ID'
-AUTH_ENDPOINT = 'https://claude.ai/oauth/authorize'
-TOKEN_ENDPOINT = 'https://console.anthropic.com/v1/oauth/token'
-REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback'
-SCOPES = 'org:create_api_key user:profile user:inference'
+AUTH_ENDPOINT = 'https://claude.com/cai/oauth/authorize'
+TOKEN_ENDPOINT = 'https://platform.claude.com/v1/oauth/token'
+REDIRECT_URI = 'https://platform.claude.com/oauth/code/callback'
+SCOPES = 'org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload'
 
 
 def generate_pkce_pair():
@@ -42,12 +42,13 @@ def build_auth_url(code_challenge):
     """
     state = secrets.token_urlsafe(32)
     params = {
-        'response_type': 'code',
+        'code': 'true',
         'client_id': CLIENT_ID,
+        'response_type': 'code',
         'redirect_uri': REDIRECT_URI,
         'scope': SCOPES,
-        'code_challenge_method': 'S256',
         'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
         'state': state,
     }
     url = f'{AUTH_ENDPOINT}?{urlencode(params)}'

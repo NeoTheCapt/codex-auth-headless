@@ -43,21 +43,25 @@ class TestAuthURL(unittest.TestCase):
         url, state = build_auth_url('test_challenge')
         parsed = urlparse(url)
         self.assertEqual(parsed.scheme, 'https')
-        self.assertEqual(parsed.netloc, 'claude.ai')
-        self.assertEqual(parsed.path, '/oauth/authorize')
+        self.assertEqual(parsed.netloc, 'claude.com')
+        self.assertEqual(parsed.path, '/cai/oauth/authorize')
 
     def test_auth_url_has_required_params(self):
         from claude_auth import build_auth_url
         url, state = build_auth_url('test_challenge')
         params = parse_qs(urlparse(url).query)
+        self.assertEqual(params['code'], ['true'])
         self.assertEqual(params['client_id'], ['REDACTED_CLAUDE_CLIENT_ID'])
-        self.assertEqual(params['redirect_uri'], ['https://console.anthropic.com/oauth/code/callback'])
+        self.assertEqual(params['redirect_uri'], ['https://platform.claude.com/oauth/code/callback'])
         self.assertEqual(params['response_type'], ['code'])
         self.assertEqual(params['code_challenge_method'], ['S256'])
         self.assertEqual(params['code_challenge'], ['test_challenge'])
         self.assertIn('org:create_api_key', params['scope'][0])
         self.assertIn('user:profile', params['scope'][0])
         self.assertIn('user:inference', params['scope'][0])
+        self.assertIn('user:sessions:claude_code', params['scope'][0])
+        self.assertIn('user:mcp_servers', params['scope'][0])
+        self.assertIn('user:file_upload', params['scope'][0])
 
     def test_auth_url_state_is_returned(self):
         from claude_auth import build_auth_url
@@ -80,13 +84,13 @@ import json
 class TestCallbackInputParser(unittest.TestCase):
     def test_extracts_code_from_url(self):
         from claude_auth import parse_callback_input
-        url = 'https://console.anthropic.com/oauth/code/callback?code=abc123'
+        url = 'https://platform.claude.com/oauth/code/callback?code=abc123'
         code = parse_callback_input(url)
         self.assertEqual(code, 'abc123')
 
     def test_extracts_code_from_url_with_extra_params(self):
         from claude_auth import parse_callback_input
-        url = 'https://console.anthropic.com/oauth/code/callback?code=abc&state=xyz&scope=test'
+        url = 'https://platform.claude.com/oauth/code/callback?code=abc&state=xyz&scope=test'
         code = parse_callback_input(url)
         self.assertEqual(code, 'abc')
 
@@ -109,14 +113,14 @@ class TestCallbackInputParser(unittest.TestCase):
 
     def test_raises_on_missing_code_in_url(self):
         from claude_auth import parse_callback_input
-        url = 'https://console.anthropic.com/oauth/code/callback?state=xyz'
+        url = 'https://platform.claude.com/oauth/code/callback?state=xyz'
         with self.assertRaises(ValueError) as ctx:
             parse_callback_input(url)
         self.assertIn('code', str(ctx.exception).lower())
 
     def test_raises_on_error_response(self):
         from claude_auth import parse_callback_input
-        url = 'https://console.anthropic.com/oauth/code/callback?error=access_denied&error_description=User+denied'
+        url = 'https://platform.claude.com/oauth/code/callback?error=access_denied&error_description=User+denied'
         with self.assertRaises(ValueError) as ctx:
             parse_callback_input(url)
         self.assertIn('access_denied', str(ctx.exception))
@@ -150,7 +154,7 @@ class TestTokenExchange(unittest.TestCase):
         self.assertEqual(body['code'], ['auth_code_abc'])
         self.assertEqual(body['code_verifier'], ['my_verifier'])
         self.assertEqual(body['client_id'], ['REDACTED_CLAUDE_CLIENT_ID'])
-        self.assertEqual(body['redirect_uri'], ['https://console.anthropic.com/oauth/code/callback'])
+        self.assertEqual(body['redirect_uri'], ['https://platform.claude.com/oauth/code/callback'])
 
     @patch('claude_auth.urlopen')
     def test_returns_parsed_tokens(self, mock_urlopen):
@@ -181,7 +185,7 @@ class TestTokenExchange(unittest.TestCase):
 
         error_body = json.dumps({'error': 'invalid_grant', 'error_description': 'Code expired'})
         mock_urlopen.side_effect = HTTPError(
-            url='https://console.anthropic.com/v1/oauth/token',
+            url='https://platform.claude.com/v1/oauth/token',
             code=400,
             msg='Bad Request',
             hdrs={},
