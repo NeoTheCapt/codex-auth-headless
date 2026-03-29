@@ -113,16 +113,17 @@ def exchange_code_for_tokens(code, code_verifier):
     Raises:
         ValueError: If the token exchange fails.
     """
-    data = urlencode({
+    payload = {
         'grant_type': 'authorization_code',
         'code': code,
         'client_id': CLIENT_ID,
         'redirect_uri': REDIRECT_URI,
         'code_verifier': code_verifier,
-    }).encode('ascii')
+    }
+    data = json.dumps(payload).encode('utf-8')
 
     request = Request(TOKEN_ENDPOINT, data=data, method='POST')
-    request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+    request.add_header('Content-Type', 'application/json')
     request.add_header('User-Agent', 'claude-code/1.0')
 
     try:

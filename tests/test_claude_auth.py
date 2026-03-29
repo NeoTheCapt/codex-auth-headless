@@ -155,12 +155,12 @@ class TestTokenExchange(unittest.TestCase):
         self.assertEqual(request.full_url, TOKEN_ENDPOINT)
         self.assertEqual(request.get_method(), 'POST')
 
-        body = parse_qs(request.data.decode())
-        self.assertEqual(body['grant_type'], ['authorization_code'])
-        self.assertEqual(body['code'], ['auth_code_abc'])
-        self.assertEqual(body['code_verifier'], ['my_verifier'])
-        self.assertEqual(body['client_id'], ['REDACTED_CLAUDE_CLIENT_ID'])
-        self.assertEqual(body['redirect_uri'], ['https://platform.claude.com/oauth/code/callback'])
+        body = json.loads(request.data.decode())
+        self.assertEqual(body['grant_type'], 'authorization_code')
+        self.assertEqual(body['code'], 'auth_code_abc')
+        self.assertEqual(body['code_verifier'], 'my_verifier')
+        self.assertEqual(body['client_id'], 'REDACTED_CLAUDE_CLIENT_ID')
+        self.assertEqual(body['redirect_uri'], 'https://platform.claude.com/oauth/code/callback')
 
     @patch('claude_auth.urlopen')
     def test_returns_parsed_tokens(self, mock_urlopen):
