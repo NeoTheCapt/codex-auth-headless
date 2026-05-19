@@ -85,7 +85,7 @@ def build_auth_url(code_challenge):
 
 
 def parse_callback_input(user_input):
-    """Extract the authorization code from user input.
+    """Extract the authorization code and state from user input.
 
     Accepts either a bare authorization code or a full callback URL.
 
@@ -93,7 +93,8 @@ def parse_callback_input(user_input):
         user_input: The raw string pasted by the user.
 
     Returns:
-        str: The authorization code.
+        tuple: (authorization_code, state, redirect_uri). state and redirect_uri
+        may be None when the user pastes a bare code.
 
     Raises:
         ValueError: If the input contains an error or no code can be extracted.
@@ -120,21 +121,47 @@ def parse_callback_input(user_input):
             raise ValueError('Missing "code" parameter in callback URL. '
                              'Make sure you copied the full URL.')
 
-        return params['code'][0]
+        redirect_uri = f'{parsed.scheme}://{parsed.netloc}{parsed.path}'
+        state = params.get('state', [None])[0]
+        return params['code'][0], state, redirect_uri
 
-    # The callback page may show code#state — strip the state part
+    # The callback page may show code#state.
     if '#' in user_input:
-        user_input = user_input.split('#')[0]
+        code, state = user_input.split('#', 1)
+        return code, state or None, None
 
-    return user_input
+    return user_input, None, None
 
 
-def exchange_code_for_tokens(code, code_verifier):
+def _format_token_error(body):
+    """Return a readable OAuth error message from a token endpoint body."""
+    try:
+        err = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    error = err.get('error', err)
+    if isinstance(error, dict):
+        error_type = error.get('type') or err.get('type') or 'unknown'
+        message = error.get('message') or error.get('error_description') or body
+    else:
+        error_type = error or err.get('type') or 'unknown'
+        message = err.get('error_description') or err.get('message') or body
+
+    request_id = err.get('request_id')
+    if request_id:
+        return f'{error_type}: {message} (request_id: {request_id})'
+    return f'{error_type}: {message}'
+
+
+def exchange_code_for_tokens(code, code_verifier, state, redirect_uri=REDIRECT_URI):
     """Exchange an authorization code for access/refresh tokens.
 
     Args:
         code: The authorization code from the OAuth callback.
         code_verifier: The original PKCE code_verifier.
+        state: The OAuth state value from the authorization request.
+        redirect_uri: The redirect URI used by the authorization request.
 
     Returns:
         dict: Token response containing access_token, refresh_token, etc.
@@ -146,8 +173,9 @@ def exchange_code_for_tokens(code, code_verifier):
         'grant_type': 'authorization_code',
         'code': code,
         'client_id': get_client_id(),
-        'redirect_uri': REDIRECT_URI,
+        'redirect_uri': redirect_uri,
         'code_verifier': code_verifier,
+        'state': state,
     }
     data = json.dumps(payload).encode('utf-8')
 
@@ -160,14 +188,18 @@ def exchange_code_for_tokens(code, code_verifier):
             return json.loads(response.read())
     except HTTPError as e:
         body = e.read().decode()
-        try:
-            err = json.loads(body)
-            raise ValueError(
-                f"Token exchange failed: {err.get('error', 'unknown')} - "
-                f"{err.get('error_description', body)}"
-            ) from e
-        except json.JSONDecodeError:
-            raise ValueError(f"Token exchange failed (HTTP {e.code}): {body}") from e
+        raise ValueError(
+            f'Token exchange failed (HTTP {e.code}): {_format_token_error(body)}'
+        ) from e
+
+
+def _scope_list(scope_value):
+    """Normalize an OAuth scope response into Claude Code's credential shape."""
+    if isinstance(scope_value, str):
+        return [scope for scope in scope_value.split() if scope]
+    if isinstance(scope_value, list):
+        return scope_value
+    return SCOPES.split()
 
 
 def save_credentials(token_response, claude_home=None):
@@ -198,6 +230,8 @@ def save_credentials(token_response, claude_home=None):
             'accessToken': token_response['access_token'],
             'refreshToken': token_response['refresh_token'],
             'expiresAt': expires_at,
+            'scopes': _scope_list(token_response.get('scope')),
+            'clientId': get_client_id(),
         },
     }
 
@@ -239,15 +273,24 @@ def main():
 
     # Step 4: Parse input
     try:
-        code = parse_callback_input(user_input)
+        code, returned_state, callback_redirect_uri = parse_callback_input(user_input)
     except ValueError as e:
         print(f'\nError: {e}')
         sys.exit(1)
 
+    if returned_state and returned_state != expected_state:
+        print('\nError: OAuth state mismatch.')
+        print('The pasted code/URL appears to come from a different login attempt.')
+        print('Open the URL printed by this script again and paste the new code from that flow.')
+        sys.exit(1)
+
+    state = returned_state or expected_state
+    redirect_uri = callback_redirect_uri or REDIRECT_URI
+
     # Step 5: Exchange code for tokens
     print('\nExchanging authorization code for tokens...')
     try:
-        tokens = exchange_code_for_tokens(code, code_verifier)
+        tokens = exchange_code_for_tokens(code, code_verifier, state, redirect_uri)
     except ValueError as e:
         print(f'\nError: {e}')
         sys.exit(1)

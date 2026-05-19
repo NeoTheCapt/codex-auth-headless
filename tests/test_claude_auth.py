@@ -89,31 +89,49 @@ class TestCallbackInputParser(unittest.TestCase):
     def test_extracts_code_from_url(self):
         from claude_auth import parse_callback_input
         url = 'https://platform.claude.com/oauth/code/callback?code=abc123'
-        code = parse_callback_input(url)
+        code, state, redirect_uri = parse_callback_input(url)
         self.assertEqual(code, 'abc123')
+        self.assertIsNone(state)
+        self.assertEqual(redirect_uri, 'https://platform.claude.com/oauth/code/callback')
 
     def test_extracts_code_from_url_with_extra_params(self):
         from claude_auth import parse_callback_input
         url = 'https://platform.claude.com/oauth/code/callback?code=abc&state=xyz&scope=test'
-        code = parse_callback_input(url)
+        code, state, redirect_uri = parse_callback_input(url)
         self.assertEqual(code, 'abc')
+        self.assertEqual(state, 'xyz')
+        self.assertEqual(redirect_uri, 'https://platform.claude.com/oauth/code/callback')
+
+    def test_extracts_localhost_redirect_uri(self):
+        from claude_auth import parse_callback_input
+        url = 'http://localhost:34631/callback?code=abc&state=xyz'
+        code, state, redirect_uri = parse_callback_input(url)
+        self.assertEqual(code, 'abc')
+        self.assertEqual(state, 'xyz')
+        self.assertEqual(redirect_uri, 'http://localhost:34631/callback')
 
     def test_accepts_bare_code(self):
         """User might paste just the authorization code."""
         from claude_auth import parse_callback_input
-        code = parse_callback_input('sk-ant-auth-abc123xyz')
+        code, state, redirect_uri = parse_callback_input('sk-ant-auth-abc123xyz')
         self.assertEqual(code, 'sk-ant-auth-abc123xyz')
+        self.assertIsNone(state)
+        self.assertIsNone(redirect_uri)
 
     def test_accepts_bare_code_with_whitespace(self):
         from claude_auth import parse_callback_input
-        code = parse_callback_input('  some_code_value  ')
+        code, state, redirect_uri = parse_callback_input('  some_code_value  ')
         self.assertEqual(code, 'some_code_value')
+        self.assertIsNone(state)
+        self.assertIsNone(redirect_uri)
 
     def test_accepts_code_hash_state_format(self):
-        """Callback page shows code#state — should extract just the code."""
+        """Callback page may show code#state."""
         from claude_auth import parse_callback_input
-        code = parse_callback_input('vk7O3LkcJ0mWzYEEv1eYw4MV6wXiuqfG#P4rKfWs8HKimEaclOgJd6ytBBD6nw')
+        code, state, redirect_uri = parse_callback_input('vk7O3LkcJ0mWzYEEv1eYw4MV6wXiuqfG#P4rKfWs8HKimEaclOgJd6ytBBD6nw')
         self.assertEqual(code, 'vk7O3LkcJ0mWzYEEv1eYw4MV6wXiuqfG')
+        self.assertEqual(state, 'P4rKfWs8HKimEaclOgJd6ytBBD6nw')
+        self.assertIsNone(redirect_uri)
 
     def test_raises_on_empty_input(self):
         from claude_auth import parse_callback_input
@@ -152,7 +170,7 @@ class TestTokenExchange(unittest.TestCase):
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        result = exchange_code_for_tokens('auth_code_abc', 'my_verifier')
+        result = exchange_code_for_tokens('auth_code_abc', 'my_verifier', 'my_state')
 
         call_args = mock_urlopen.call_args
         request = call_args[0][0]
@@ -163,8 +181,35 @@ class TestTokenExchange(unittest.TestCase):
         self.assertEqual(body['grant_type'], 'authorization_code')
         self.assertEqual(body['code'], 'auth_code_abc')
         self.assertEqual(body['code_verifier'], 'my_verifier')
+        self.assertEqual(body['state'], 'my_state')
         self.assertEqual(body['client_id'], 'test_claude_client_id')
         self.assertEqual(body['redirect_uri'], 'https://platform.claude.com/oauth/code/callback')
+
+    @patch('claude_auth.urlopen')
+    def test_sends_callback_redirect_uri_when_provided(self, mock_urlopen):
+        from claude_auth import exchange_code_for_tokens
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            'access_token': 'at_123',
+            'refresh_token': 'rt_456',
+            'expires_in': 3600,
+            'token_type': 'Bearer',
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        exchange_code_for_tokens(
+            'auth_code_abc',
+            'my_verifier',
+            'my_state',
+            'http://localhost:34631/callback',
+        )
+
+        request = mock_urlopen.call_args[0][0]
+        body = json.loads(request.data.decode())
+        self.assertEqual(body['redirect_uri'], 'http://localhost:34631/callback')
 
     @patch('claude_auth.urlopen')
     def test_returns_parsed_tokens(self, mock_urlopen):
@@ -182,7 +227,7 @@ class TestTokenExchange(unittest.TestCase):
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        result = exchange_code_for_tokens('code', 'verifier')
+        result = exchange_code_for_tokens('code', 'verifier', 'state')
         self.assertEqual(result['access_token'], 'at_123')
         self.assertEqual(result['refresh_token'], 'rt_456')
         self.assertEqual(result['expires_in'], 3600)
@@ -203,7 +248,7 @@ class TestTokenExchange(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError) as ctx:
-            exchange_code_for_tokens('bad_code', 'verifier')
+            exchange_code_for_tokens('bad_code', 'verifier', 'state')
         self.assertIn('invalid_grant', str(ctx.exception))
 
 
@@ -233,6 +278,8 @@ class TestCredentialWriter(unittest.TestCase):
             oauth = saved['claudeAiOauth']
             self.assertEqual(oauth['accessToken'], 'sk-ant-oat01-test')
             self.assertEqual(oauth['refreshToken'], 'rt_test')
+            self.assertEqual(oauth['clientId'], 'test_claude_client_id')
+            self.assertIn('user:inference', oauth['scopes'])
             self.assertIsInstance(oauth['expiresAt'], int)
             # expiresAt should be in milliseconds (> 1 trillion)
             self.assertGreater(oauth['expiresAt'], 1_000_000_000_000)
@@ -292,7 +339,12 @@ class TestMainFlow(unittest.TestCase):
                 mock_input.return_value = 'my_auth_code_123'
                 main()
 
-        mock_exchange.assert_called_once_with('my_auth_code_123', 'verifier')
+        mock_exchange.assert_called_once_with(
+            'my_auth_code_123',
+            'verifier',
+            'test_state',
+            'https://platform.claude.com/oauth/code/callback',
+        )
         mock_save.assert_called_once()
 
     @patch('claude_auth.exchange_code_for_tokens')
@@ -309,11 +361,31 @@ class TestMainFlow(unittest.TestCase):
 
         with patch('claude_auth.generate_pkce_pair', return_value=('verifier', 'challenge')):
             with patch('claude_auth.build_auth_url', return_value=('https://claude.ai/oauth/authorize?...', 'test_state')):
-                mock_input.return_value = 'https://console.anthropic.com/oauth/code/callback?code=url_code_456'
+                mock_input.return_value = 'https://platform.claude.com/oauth/code/callback?code=url_code_456&state=test_state'
                 main()
 
-        mock_exchange.assert_called_once_with('url_code_456', 'verifier')
+        mock_exchange.assert_called_once_with(
+            'url_code_456',
+            'verifier',
+            'test_state',
+            'https://platform.claude.com/oauth/code/callback',
+        )
         mock_save.assert_called_once()
+
+    @patch('claude_auth.exchange_code_for_tokens')
+    @patch('claude_auth.save_credentials')
+    @patch('builtins.input')
+    def test_main_flow_state_mismatch_aborts(self, mock_input, mock_save, mock_exchange):
+        from claude_auth import main
+
+        with patch('claude_auth.generate_pkce_pair', return_value=('verifier', 'challenge')):
+            with patch('claude_auth.build_auth_url', return_value=('https://example.com', 'expected_state')):
+                mock_input.return_value = 'http://localhost:34631/callback?code=url_code_456&state=wrong_state'
+                with self.assertRaises(SystemExit):
+                    main()
+
+        mock_exchange.assert_not_called()
+        mock_save.assert_not_called()
 
     @patch('claude_auth.exchange_code_for_tokens')
     @patch('claude_auth.save_credentials')
