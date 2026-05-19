@@ -8,6 +8,8 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 import json
 import os
+import getpass
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +17,8 @@ AUTH_ENDPOINT = 'https://claude.com/cai/oauth/authorize'
 TOKEN_ENDPOINT = 'https://platform.claude.com/v1/oauth/token'
 REDIRECT_URI = 'https://platform.claude.com/oauth/code/callback'
 SCOPES = 'org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload'
+KEYCHAIN_SERVICE = 'Claude Code-credentials'
+KEYCHAIN_STDIN_LIMIT = 4032
 
 
 def _load_env_file():
@@ -202,30 +206,14 @@ def _scope_list(scope_value):
     return SCOPES.split()
 
 
-def save_credentials(token_response, claude_home=None):
-    """Save OAuth tokens to ~/.claude/.credentials.json in the format Claude Code expects.
-
-    Args:
-        token_response: Dict from the token endpoint (access_token, refresh_token, etc.)
-        claude_home: Override for ~/.claude directory (used in tests).
-    """
-    if claude_home is None:
-        claude_home = os.path.join(Path.home(), '.claude')
-
-    os.makedirs(claude_home, exist_ok=True)
-    cred_path = os.path.join(claude_home, '.credentials.json')
-
-    # Back up existing credentials
-    if os.path.exists(cred_path):
-        bak_path = cred_path + '.bak'
-        os.replace(cred_path, bak_path)
-
+def _build_credentials(token_response):
+    """Build Claude Code's persisted credentials payload."""
     expires_in = token_response.get('expires_in', 3600)
-    # Claude Code uses Unix timestamp in milliseconds
+    # Claude Code uses Unix timestamp in milliseconds.
     import time
     expires_at = int((time.time() + expires_in) * 1000)
 
-    credentials = {
+    return {
         'claudeAiOauth': {
             'accessToken': token_response['access_token'],
             'refreshToken': token_response['refresh_token'],
@@ -235,7 +223,23 @@ def save_credentials(token_response, claude_home=None):
         },
     }
 
-    # Write with restricted permissions
+
+def _write_plaintext_credentials(credentials, claude_home=None):
+    """Save OAuth tokens to .credentials.json in the format Claude Code expects."""
+    if claude_home is None:
+        claude_home = os.environ.get('CLAUDE_CONFIG_DIR')
+    if claude_home is None:
+        claude_home = os.path.join(Path.home(), '.claude')
+
+    os.makedirs(claude_home, exist_ok=True)
+    cred_path = os.path.join(claude_home, '.credentials.json')
+
+    # Back up existing credentials.
+    if os.path.exists(cred_path):
+        bak_path = cred_path + '.bak'
+        os.replace(cred_path, bak_path)
+
+    # Write with restricted permissions.
     fd = os.open(cred_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         with os.fdopen(fd, 'w') as f:
@@ -244,6 +248,98 @@ def save_credentials(token_response, claude_home=None):
     except Exception:
         os.close(fd)
         raise
+
+    return cred_path
+
+
+def _read_keychain_credentials(account=None, service=KEYCHAIN_SERVICE):
+    """Read existing Claude Code credentials from macOS Keychain."""
+    if account is None:
+        account = getpass.getuser()
+
+    result = subprocess.run(
+        ['security', 'find-generic-password', '-a', account, '-w', '-s', service],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _quote_security_arg(value):
+    """Quote a value for security(1)'s interactive command parser."""
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def _write_keychain_credentials(credentials, account=None, service=KEYCHAIN_SERVICE):
+    """Save OAuth tokens to the macOS Keychain item Claude Code reads."""
+    if account is None:
+        account = getpass.getuser()
+
+    existing = _read_keychain_credentials(account=account, service=service)
+    existing['claudeAiOauth'] = credentials['claudeAiOauth']
+    payload = json.dumps(existing, separators=(',', ':'))
+    payload_hex = payload.encode('utf-8').hex()
+
+    command = (
+        'add-generic-password -U '
+        f'-a {_quote_security_arg(account)} '
+        f'-s {_quote_security_arg(service)} '
+        f'-X {_quote_security_arg(payload_hex)}\n'
+    )
+
+    if len(command) <= KEYCHAIN_STDIN_LIMIT:
+        result = subprocess.run(
+            ['security', '-i'],
+            input=command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    else:
+        result = subprocess.run(
+            [
+                'security', 'add-generic-password', '-U',
+                '-a', account,
+                '-s', service,
+                '-X', payload_hex,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or '').strip().replace('\n', '; ')
+        raise RuntimeError(f'Failed to save credentials to macOS Keychain: {detail}')
+
+    return f'macOS Keychain item {service}'
+
+
+def save_credentials(token_response, claude_home=None):
+    """Save OAuth tokens where Claude Code expects them.
+
+    On macOS, Claude Code reads OAuth credentials from the login Keychain.
+    On other platforms, and in tests with claude_home, it reads .credentials.json.
+
+    Args:
+        token_response: Dict from the token endpoint (access_token, refresh_token, etc.)
+        claude_home: Override for ~/.claude directory (used in tests).
+    """
+    credentials = _build_credentials(token_response)
+    if claude_home is None and sys.platform == 'darwin':
+        return _write_keychain_credentials(credentials)
+
+    return _write_plaintext_credentials(credentials, claude_home=claude_home)
 
 
 def main():
@@ -296,8 +392,13 @@ def main():
         sys.exit(1)
 
     # Step 6: Save credentials
-    save_credentials(tokens)
-    print('\nSuccess! Credentials saved to ~/.claude/.credentials.json')
+    try:
+        credential_location = save_credentials(tokens)
+    except (OSError, RuntimeError) as e:
+        print(f'\nError: Failed to save credentials: {e}')
+        sys.exit(1)
+
+    print(f'\nSuccess! Credentials saved to {credential_location}')
     print('You can now use Claude Code normally.')
 
 

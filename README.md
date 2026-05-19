@@ -69,7 +69,10 @@ The tool will:
 3. The browser will redirect to Anthropic's console which displays an authorization code
 4. Copy the code (or the full callback URL) and paste it back into the terminal
 
-Done! Credentials are saved to `~/.claude/.credentials.json` and Claude Code will work normally.
+Done! Credentials are saved where Claude Code expects them:
+
+- macOS: the `Claude Code-credentials` item in the login Keychain
+- Other platforms: `~/.claude/.credentials.json`
 
 ## Example Session: Codex
 
@@ -119,14 +122,15 @@ Paste the authorization code (or callback URL) here: abc123xyz
 
 Exchanging authorization code for tokens...
 
-Success! Credentials saved to ~/.claude/.credentials.json
+Success! Credentials saved to macOS Keychain item Claude Code-credentials
 You can now use Claude Code normally.
 ```
 
 ## Security
 
 - Uses PKCE (Proof Key for Code Exchange) - no client secrets stored
-- Credentials saved with `0600` permissions (owner read/write only)
+- Claude credentials are saved to macOS Keychain on macOS, or with `0600`
+  permissions in `.credentials.json` on other platforms
 - State parameter validated to prevent CSRF attacks
 - Existing `auth.json` backed up before overwriting
 

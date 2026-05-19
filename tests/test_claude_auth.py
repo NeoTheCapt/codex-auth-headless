@@ -266,9 +266,10 @@ class TestCredentialWriter(unittest.TestCase):
                 'expires_in': 3600,
                 'token_type': 'Bearer',
             }
-            save_credentials(token_response, claude_home=tmpdir)
+            saved_path = save_credentials(token_response, claude_home=tmpdir)
 
             cred_path = os.path.join(tmpdir, '.credentials.json')
+            self.assertEqual(saved_path, cred_path)
             self.assertTrue(os.path.exists(cred_path))
 
             with open(cred_path) as f:
@@ -319,6 +320,57 @@ class TestCredentialWriter(unittest.TestCase):
             cred_path = os.path.join(tmpdir, '.credentials.json')
             mode = os.stat(cred_path).st_mode & 0o777
             self.assertEqual(mode, 0o600)
+
+    @patch('claude_auth._write_keychain_credentials')
+    def test_uses_keychain_by_default_on_macos(self, mock_write_keychain):
+        from claude_auth import save_credentials
+
+        mock_write_keychain.return_value = 'macOS Keychain item Claude Code-credentials'
+        with patch('claude_auth.sys.platform', 'darwin'):
+            result = save_credentials({
+                'access_token': 'a',
+                'refresh_token': 'r',
+                'expires_in': 3600,
+            })
+
+        self.assertEqual(result, 'macOS Keychain item Claude Code-credentials')
+        mock_write_keychain.assert_called_once()
+        credentials = mock_write_keychain.call_args[0][0]
+        self.assertEqual(credentials['claudeAiOauth']['accessToken'], 'a')
+        self.assertEqual(credentials['claudeAiOauth']['refreshToken'], 'r')
+
+    @patch('claude_auth.subprocess.run')
+    @patch('claude_auth._read_keychain_credentials')
+    def test_writes_keychain_payload(self, mock_read, mock_run):
+        from claude_auth import _write_keychain_credentials, KEYCHAIN_SERVICE
+
+        mock_read.return_value = {'other': {'preserved': True}}
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        result = _write_keychain_credentials(
+            {
+                'claudeAiOauth': {
+                    'accessToken': 'at',
+                    'refreshToken': 'rt',
+                    'expiresAt': 123,
+                    'scopes': ['user:inference'],
+                    'clientId': 'cid',
+                },
+            },
+            account='testuser',
+        )
+
+        self.assertEqual(result, f'macOS Keychain item {KEYCHAIN_SERVICE}')
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[0], ['security', '-i'])
+        self.assertIn('add-generic-password -U', kwargs['input'])
+        self.assertIn('-a "testuser"', kwargs['input'])
+        self.assertIn(f'-s "{KEYCHAIN_SERVICE}"', kwargs['input'])
+        payload_hex = kwargs['input'].split('-X "', 1)[1].split('"', 1)[0]
+        payload = json.loads(bytes.fromhex(payload_hex).decode('utf-8'))
+        self.assertTrue(payload['other']['preserved'])
+        self.assertEqual(payload['claudeAiOauth']['accessToken'], 'at')
 
 
 class TestMainFlow(unittest.TestCase):
